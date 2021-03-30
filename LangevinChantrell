@@ -1,0 +1,97 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Tue Mar  9 14:36:30 2021
+
+@author: huntersimonson
+"""
+
+import pandas as pd
+import matplotlib.pyplot as plt
+import scipy.integrate as integrate
+import numpy as np
+from scipy import optimize
+
+
+
+import time
+start = time.time()
+
+
+
+
+#reading the data from the sheet
+df = pd.read_excel (r'/Users/huntersimonson/Desktop/SampleDataFeb15.xlsx') 
+#for an earlier version of Excel, you may need to use the file extension of 'xls'
+
+#seperating the Field and Magnetization data
+#data range determined from excel sheet
+#Fill in these!!:
+VecLength=len(df)    #number of data points
+Ms=df['Magnetization'].max()          #saturation magnetization from maximum of plot
+sig=0.04      #geometric deviation estimation       
+Dmv=1e-8 #volume weighted magnetic diameter estimation
+
+#if any datapoints in the field have a value of 0 program wont run, so just input a small value like 4
+H=(df['Field'][0:VecLength]) #in A/m
+M=(df['Magnetization'][0:VecLength]) #in A/m
+
+#constants
+kb=1.380648*10**-23; #J/K
+T=300; #Kelvin - change this if done at different T
+k=kb*T; #Joules, kbT energy
+mu=4*np.pi*1e-7 #vacuum permitivity
+Md=446000 #bulk domain magnetization of Fe3O4
+
+
+def derM(Dm,Dmv,lnsig,H):
+    alpha = (np.pi*mu*Md*(Dm**3)*H)/(6*k)
+    Lalpha = 1.0/np.tanh(alpha)-1.0/alpha
+    nv = Ms*(1.0/(np.sqrt(2*np.pi)*Dm*lnsig)*np.exp(-(np.log(Dm/Dmv)**2)/(2*(lnsig**2))))
+    return Lalpha*nv
+
+
+
+def func(x,Dmv,lnsig):    #defining function for optimization
+    Langevin=[]     #defining vector to be populated with fitted data
+    for H in x:  #integrate over all data points
+        #defining the combined Langevin-Chantrell Equation to be integrated
+        integrand= lambda Dm: derM(Dm,Dmv,lnsig,H)
+        integrated=integrate.quad(integrand,a=1e-9,b=1e-7)  #integrating the LC function
+        Langevin.append(integrated[0])  #populating vector with fitted data 
+    return Langevin
+
+start=time.time()
+parameter_initial = np.array([Dmv,sig])   #initial guess of parameters
+parameter_bounds = ((Dmv-1,sig-0.1),(Dmv+1,sig+0.1))
+#optimizing the parameters to minimize SSE
+parameter_optimal, cov = optimize.curve_fit(func, H, M,p0=parameter_initial) #,bounds=parameter_bounds)
+
+VolumeWeightedDiameter=parameter_optimal[0]*1e9
+RoundedVWD=round(VolumeWeightedDiameter,2)
+LnSigma=parameter_optimal[1]
+RoundedLS=round(LnSigma,3)
+#printing values
+print("Diamater (nm) is", "%.2f" % VolumeWeightedDiameter)
+print("Ln(sigma) is", "%.3f" % LnSigma)
+
+#Running function with optimized parameters
+Langevin1=func(H, *parameter_optimal)
+
+#plotting fitted data and real data
+plt.plot(H,Langevin1, 'r',label='Langevin-Chantrell Fit')
+plt.scatter(H,M, facecolors='none', edgecolors='b',label='Dataset')
+plt.ylabel('Magnetization, [A/m]')
+plt.xlabel('Magnetic Field, [A/m]')
+plt.ticklabel_format(style='sci', axis='x', scilimits=(0,0)) #setting x axis to scientific
+plt.locator_params(axis='y', nbins=3) #nbins=number of ticks
+plt.locator_params(axis='x', nbins=5)
+plt.text(3000000, -25000, RoundedVWD)
+plt.text(600000, -25000, "Diameter [nm]:")
+plt.text(3000000, -10000, RoundedLS)
+plt.text(600000, -10000, "Ln(Sigma):")
+plt.legend(loc='best')
+
+
+print('It took', time.time()-start, 'seconds.') #takes forever on my computer so this is to let me know when it's done
+
